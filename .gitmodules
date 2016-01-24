@@ -1,0 +1,3 @@
+[submodule "dirtmon/Arduino-Makefile"]
+	path = dirtmon/Arduino-Makefile
+	url = git@github.com:jeffkowalski/Arduino-Makefile.git
