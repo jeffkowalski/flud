@@ -650,65 +650,35 @@ end
 
 require 'fileutils'
 require 'logger'
+require 'thor'
+
 
 # server class from https://github.com/jakesgordon/ruby-sample-daemon/blob/master/lib/server.rb
-class Server
-  VERSION = "1.0.0"
+class Server < Thor
+  attr_reader :quit
 
-  attr_reader :options, :quit
+  class_option :logfile,    :type => :string, :default => '/var/log/flud.log', :desc => "log output to file (use empty string to log to stdout)"
+  class_option :pidfile,    :type => :string, :default => '/var/run/flud.pid', :desc => "write pid to file (use empty string to avoid pidfile)"
+  class_option :verbose,    :type => :boolean, :aliases => "-v", :desc => "increase verbosity"
+  class_option :foreground, :type => :boolean, :aliases => "-f", :desc => "increase verbosity"
 
-  def initialize options
-    @options = options
-    options[:logfile] = File.expand_path(logfile) if logfile?   # daemonization might change CWD so expand any relative paths in advance
-    options[:pidfile] = File.expand_path(pidfile) if pidfile?   # (ditto)
-  end
-
-  def daemonize?
-    !options[:foreground]
-  end
-
-  def logfile
-    options[:logfile]
-  end
-
-  def pidfile
-    options[:pidfile]
-  end
-
-  def logfile?
-    !logfile.nil?
-  end
-
-  def pidfile?
-    !pidfile.nil?
-  end
-
-  def info msg
-    puts "[#{Process.pid}] [#{Time.now}] #{msg}"
-  end
-
-  #--------------------------------------------------------------------------
-
-  def self.run! options
-    Server.new(options).run!
-  end
-
-  def run!
-    if daemonize? && Process.euid != 0
+  default_task :control
+  desc "control", "Run the flud control system"
+  def control
+    if (not options[:foreground]) && (Process.euid != 0)
       puts "only root can daemonize, run with --foreground instead"
       exit
     end
 
     check_pid
-    daemonize if daemonize?
+    daemonize unless options[:foreground]
     write_pid
     trap_signals
 
-    if daemonize?
-      redirect_output
-    end
+    redirect_output unless options[:logfile].empty?
+
     $logger = Logger.new STDOUT
-    $logger.level = $DEBUG ? Logger::DEBUG : Logger::INFO
+    $logger.level = options[:verbose] ? Logger::DEBUG : Logger::INFO
     $logger.info 'starting'
 
     $semaphore = Mutex::new
@@ -716,6 +686,7 @@ class Server
     $valves    = Valves::new
     $weather   = WeatherClient::new
     $calendar  = CalendarClient::new
+    $calendar.auth !options[:log]
     $status    = Status::new
     $trigger   = Time.apocalypse
     $rainfall  = 0
@@ -755,120 +726,71 @@ class Server
     $logger.info 'exiting'
   end
 
-  def daemonize
-    exit if fork
-    Process.setsid
-    exit if fork
-    Dir.chdir "/"
-  end
 
-  def redirect_output
-    FileUtils.mkdir_p(File.dirname(logfile), :mode => 0755)
-    FileUtils.touch logfile
-    File.chmod 0644, logfile
-    $stderr.reopen logfile, 'a'
-    $stdout.reopen $stderr
-    $stdout.sync = $stderr.sync = true
-  end
+  no_commands {
+    def daemonize
+      exit if fork
+      Process.setsid
+      exit if fork
+      Dir.chdir "/"
+    end
 
-  def suppress_output
-    $stderr.reopen '/dev/null', 'a'
-    $stdout.reopen $stderr
-  end
+    def redirect_output
+      FileUtils.mkdir_p(File.dirname(options[:logfile]), :mode => 0755)
+      FileUtils.touch options[:logfile]
+      File.chmod 0644, options[:logfile]
+      $stderr.reopen options[:logfile], 'a'
+      $stdout.reopen $stderr
+      $stdout.sync = $stderr.sync = true
+    end
 
-  def write_pid
-    if pidfile? && Process.euid == 0
-      begin
-        File.open(pidfile, ::File::CREAT | ::File::EXCL | ::File::WRONLY){|f| f.write "#{Process.pid}" }
-        at_exit { File.delete(pidfile) if File.exists? pidfile }
-      rescue Errno::EEXIST
-        check_pid
-        retry
+    def write_pid
+      if (not options[:pidfile].empty?) && Process.euid == 0
+        begin
+          File.open(options[:pidfile], ::File::CREAT | ::File::EXCL | ::File::WRONLY){|f| f.write "#{Process.pid}" }
+          at_exit { File.delete(options[:pidfile]) if File.exists? options[:pidfile] }
+        rescue Errno::EEXIST
+          check_pid
+          retry
+        end
       end
     end
-  end
 
-  def check_pid
-    if pidfile?
-      case pid_status pidfile
-      when :running, :not_owned
-        puts "A server is already running. Check #{pidfile}"
-        exit 1
-      when :dead
-        File.delete pidfile
+    def check_pid
+      if not options[:pidfile].empty?
+        case pid_status options[:pidfile]
+        when :running, :not_owned
+          puts "A server is already running. Check #{pidfile}"
+          exit 1
+        when :dead
+          File.delete options[:pidfile]
+        end
       end
     end
-  end
 
-  def pid_status pidfile
-    return :exited unless File.exists? pidfile
-    pid = ::File.read(pidfile).to_i
-    return :dead if pid == 0
-    Process.kill 0, pid
-    :running
-  rescue Errno::ESRCH
-    :dead
-  rescue Errno::EPERM
-    :not_owned
-  end
+    def pid_status pidfile
+      return :exited unless File.exists? options[:pidfile]
+      pid = ::File.read(options[:pidfile]).to_i
+      return :dead if pid == 0
+      Process.kill 0, pid
+      :running
+    rescue Errno::ESRCH
+      :dead
+    rescue Errno::EPERM
+      :not_owned
+    end
 
-  def trap_signals
-    trap(:INT)  do $logger.info 'caught SIGINT, exiting gracefully'  ; @quit = true; end
-    trap(:QUIT) do $logger.info 'caught SIGQUIT, exiting gracefully' ; @quit = true; end
-    trap(:TERM) do $logger.info 'caught SIGTERM, exiting gracefully' ; @quit = true; end
-  end
+    def trap_signals
+      trap(:INT)  do @quit = true; end
+      trap(:QUIT) do @quit = true; end
+      trap(:TERM) do @quit = true; end
+    end
+  }
 end
-
-
-# -------------------------------------------------------------------------------------------
-# --------------------------------------------------------------------------------- [Options]
-# -------------------------------------------------------------------------------------------
-
-require 'optparse'
-
-options = { :action => :run, :foreground => false, :logfile => '/var/log/flud.log', :pidfile => '/var/run/flud.pid' }
-
-foreground_help = "don't daemonize (default: false)"
-pidfile_help    = "the pid filename"
-logfile_help    = "the log filename"
-include_help    = "an additional $LOAD_PATH (may be used more than once)"
-debug_help      = "set $DEBUG to true"
-warn_help       = "enable warnings"
-
-op = OptionParser.new
-op.banner =  "flud control daemon"
-op.separator ""
-op.separator "Usage: flud [options]"
-op.separator ""
-
-op.separator ""
-op.separator "Process options:"
-op.on("-f", "--foreground",  foreground_help) {         options[:foreground] = true  }
-op.on("-p", "--pid PIDFILE", pidfile_help)    { |value| options[:pidfile]    = value }
-op.on("-l", "--log LOGFILE", logfile_help)    { |value| options[:logfile]    = value }
-
-op.separator ""
-op.separator "Ruby options:"
-op.on("-I", "--include PATH", include_help) { |value| $LOAD_PATH.unshift(*value.split(":").map{|v| File.expand_path(v)}) }
-op.on(      "--debug",        debug_help)   { $DEBUG = true }
-op.on(      "--warn",         warn_help)    { $-w = true    }
-
-op.separator ""
-op.separator "Common options:"
-op.on("-h", "--help")    { options[:action] = :help    }
-op.on("-v", "--version") { options[:action] = :version }
-
-op.separator ""
-op.parse!(ARGV)
 
 
 # -------------------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------------- [Run]
 # -------------------------------------------------------------------------------------------
 
-case options[:action]
-when :help    then puts op.to_s
-when :version then puts Server::VERSION
-else
-  Server.run! options
-end
+Server.start
