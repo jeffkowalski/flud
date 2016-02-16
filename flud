@@ -411,8 +411,8 @@ class Status < Updateable
 end
 
 
-# ------------------------------------------------------------------------------- [Webserver]
 # -------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------- [Webserver]
 # -------------------------------------------------------------------------------------------
 
 require 'webrick'
@@ -478,15 +478,15 @@ class Simple < WEBrick::HTTPServlet::AbstractServlet
   end
 
   def do_api_getStatus request, response
-     response.status = 200
-     response['Content-Type'] = 'text/json'
-     response.body = {:timestamp => Time.now,
-                      :trigger   => $trigger,
-                      :rainfall  => $rainfall,
-                      :moisture  => $moisture,
-                      :voltage   => $voltage,
-                      :dirtmon_timestamp => $dirtmon_timestamp,
-                      :valveOn   => $valves.on}.to_json
+    response.status = 200
+    response['Content-Type'] = 'text/json'
+    response.body = {:timestamp => Time.now,
+                     :trigger   => $trigger,
+                     :rainfall  => $rainfall,
+                     :moisture  => $moisture,
+                     :voltage   => $voltage,
+                     :dirtmon_timestamp => $dirtmon_timestamp,
+                     :valveOn   => $valves.on}.to_json
   end
 
   def do_index request, response
@@ -668,7 +668,6 @@ end
 # -------------------------------------------------------------------------------------------
 # ---------------------------------------------------------------------------------- [Config]
 # -------------------------------------------------------------------------------------------
-
 
 class Configuration
   attr_accessor :params
