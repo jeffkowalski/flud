@@ -27,6 +27,7 @@ class XivelyClient
     @client = Xively::Client.new $config[:xively_apikey]
     @url = "/v2/feeds/#{$config[:xively_feed]}"
   end
+
   def put(stream, value)
     $logger.debug "putting data {#{stream}=>#{value}} to xively"
     json = { :version => "1.0.0", :datastreams => [ {:id => stream, :current_value => value} ] }.to_json
@@ -44,7 +45,7 @@ end
 # ---------------------------------------------------------------------------------- [Valves]
 # -------------------------------------------------------------------------------------------
 
-require 'wiringpi'
+require 'wiringpi2'
 
 class Valves
   # For connections between RPi and OSpi, see
@@ -64,12 +65,14 @@ class Valves
     @gpio = nil
     @on = 0
 
-    return if # $DEBUG ||
-              RUBY_PLATFORM != 'arm-linux-eabihf'
-
-    @gpio = WiringPi::GPIO.new
-    [DATA_PIN, SHIFT_PIN, STORE_PIN, NOE_PIN].each { |pin| @gpio.mode pin, OUTPUT }
-    [DATA_PIN, SHIFT_PIN, STORE_PIN, NOE_PIN].each { |pin| @gpio.write pin, 0 }
+    if RUBY_PLATFORM == 'armv6l-linux-eabihf'
+      $logger.info "initializing valves"
+      @gpio = WiringPi::GPIO.new
+      [DATA_PIN, SHIFT_PIN, STORE_PIN, NOE_PIN].each { |pin| @gpio.pin_mode pin, WiringPi::OUTPUT }
+      [DATA_PIN, SHIFT_PIN, STORE_PIN, NOE_PIN].each { |pin| @gpio.digital_write pin, WiringPi::LOW }
+    else
+      $logger.info "no valves found on this platform"
+    end
 
     self.stop
   end
@@ -83,21 +86,21 @@ class Valves
   end
 
   def commit
+    $logger.info "committing valves"
+
     if @gpio
-      $logger.info "committing valves"
-
-      @gpio.write SHIFT_PIN, 0
-      @gpio.write STORE_PIN, 0
+      @gpio.digital_write SHIFT_PIN, WiringPi::LOW
+      @gpio.digital_write STORE_PIN, WiringPi::LOW
       8.downto(1) do |ii|
-        @gpio.write SHIFT_PIN, 0
-        @gpio.write DATA_PIN, @on == ii ? 1 : 0
-        @gpio.write SHIFT_PIN, 1
+        @gpio.digital_write SHIFT_PIN, WiringPi::LOW
+        @gpio.digital_write DATA_PIN, @on == ii ? WiringPi::HIGH : WiringPi::LOW
+        @gpio.digital_write SHIFT_PIN, WiringPi::HIGH
       end
-      @gpio.write STORE_PIN, 1
+      @gpio.digital_write STORE_PIN, WiringPi::HIGH
+    end
 
-      8.downto(1) do |ii|
-        $xively.put "valve.#{ii}", @on == ii ? 1 : 0
-      end
+    8.downto(1) do |ii|
+      $xively.put "valve.#{ii}", @on == ii ? WiringPi::HIGH : WiringPi::LOW
     end
   end
 
