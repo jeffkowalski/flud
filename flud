@@ -193,7 +193,8 @@ require_relative './patch.rb'
 
 OOB_URI = 'urn:ietf:wg:oauth:2.0:oob'
 APPLICATION_NAME = 'flud'
-CLIENT_SECRETS_PATH = 'client_secret.json'
+CLIENT_SECRETS_PATH = ["/etc/#{APPLICATION_NAME}", '.'].select{ |dir| File.exists? "#{dir}/client_secret.json" }.first + "/client_secret.json"
+ENV['HOME'] ||= '/root'
 CREDENTIALS_PATH = File.join(Dir.home, '.credentials', "flud.yaml")
 SCOPE = 'https://www.googleapis.com/auth/calendar.readonly'
 
@@ -629,7 +630,7 @@ class Configuration
   end
 end
 
-$config = Configuration::new(["flud.yml", "/etc/flud.yml"])
+$config = Configuration::new(["flud.yml", "/etc/flud/flud.yml"])
 
 
 class IOToLog < IO
@@ -657,25 +658,42 @@ require 'thor'
 class Server < Thor
   attr_reader :quit
 
-  class_option :logfile,    :type => :string, :default => '/var/log/flud.log', :desc => "log output to file (use empty string to log to stdout)"
-  class_option :pidfile,    :type => :string, :default => '/var/run/flud.pid', :desc => "write pid to file (use empty string to avoid pidfile)"
-  class_option :verbose,    :type => :boolean, :aliases => "-v", :desc => "increase verbosity"
-  class_option :foreground, :type => :boolean, :aliases => "-f", :desc => "increase verbosity"
+  desc "auth", "Authorize the application with google services"
+  def auth
+    $logger = Logger.new STDOUT
+    $calendar = CalendarClient::new
+    $calendar.auth true
+  end
 
+  option :logfile,    :type => :string, :default => '/var/log/flud.log', :desc => "log output to file (use empty string to log to stdout)"
+  option :pidfile,    :type => :string, :default => '/var/run/flud.pid', :desc => "write pid to file (use empty string to avoid pidfile)"
+  option :verbose,    :type => :boolean, :aliases => "-v", :desc => "increase verbosity"
+  option :foreground, :type => :boolean, :aliases => "-f", :desc => "don't daemonize, run in foreground"
+  option :debug,      :type => :boolean, :desc => "debug mode, implies --logfile='', --pidfile='', --foreground, --verbose"
   default_task :control
   desc "control", "Run the flud control system"
   def control
-    if (not options[:foreground]) && (Process.euid != 0)
+    puts options
+    newoptions=options.dup # unfreeze
+    options=newoptions
+    if options[:debug]
+      options[:logfile] = ''
+      options[:pidfile] = ''
+      options[:verbose] = true
+      options[:foreground] = true
+    end
+
+    if (not options[:foreground]) && Process.euid != 0
       puts "only root can daemonize, run with --foreground instead"
       exit
     end
 
-    check_pid
+    check_pid options[:pidfile]
     daemonize unless options[:foreground]
-    write_pid
+    write_pid options[:pidfile]
     trap_signals
 
-    redirect_output unless options[:logfile].empty?
+    redirect_output options[:logfile]
 
     $logger = Logger.new STDOUT
     $logger.level = options[:verbose] ? Logger::DEBUG : Logger::INFO
@@ -686,7 +704,7 @@ class Server < Thor
     $valves    = Valves::new
     $weather   = WeatherClient::new
     $calendar  = CalendarClient::new
-    $calendar.auth !options[:log]
+    $calendar.auth options[:logfile].empty? && options[:foreground]
     $status    = Status::new
     $trigger   = Time.apocalypse
     $rainfall  = 0
@@ -735,42 +753,44 @@ class Server < Thor
       Dir.chdir "/"
     end
 
-    def redirect_output
-      FileUtils.mkdir_p(File.dirname(options[:logfile]), :mode => 0755)
-      FileUtils.touch options[:logfile]
-      File.chmod 0644, options[:logfile]
-      $stderr.reopen options[:logfile], 'a'
-      $stdout.reopen $stderr
-      $stdout.sync = $stderr.sync = true
+    def redirect_output logfile
+      if not logfile.empty?
+        FileUtils.mkdir_p(File.dirname(logfile), :mode => 0755)
+        FileUtils.touch logfile
+        File.chmod 0644, logfile
+        $stderr.reopen logfile, 'a'
+        $stdout.reopen $stderr
+        $stdout.sync = $stderr.sync = true
+      end
     end
 
-    def write_pid
-      if (not options[:pidfile].empty?) && Process.euid == 0
+    def write_pid pidfile
+      if (not pidfile.empty?) && Process.euid == 0
         begin
-          File.open(options[:pidfile], ::File::CREAT | ::File::EXCL | ::File::WRONLY){|f| f.write "#{Process.pid}" }
-          at_exit { File.delete(options[:pidfile]) if File.exists? options[:pidfile] }
+          File.open(pidfile, ::File::CREAT | ::File::EXCL | ::File::WRONLY){|f| f.write "#{Process.pid}" }
+          at_exit { File.delete(pidfile) if File.exists? pidfile }
         rescue Errno::EEXIST
-          check_pid
+          check_pid pidfile
           retry
         end
       end
     end
 
-    def check_pid
-      if not options[:pidfile].empty?
-        case pid_status options[:pidfile]
+    def check_pid pidfile
+      if not pidfile.empty?
+        case pid_status pidfile
         when :running, :not_owned
           puts "A server is already running. Check #{pidfile}"
           exit 1
         when :dead
-          File.delete options[:pidfile]
+          File.delete pidfile
         end
       end
     end
 
     def pid_status pidfile
-      return :exited unless File.exists? options[:pidfile]
-      pid = ::File.read(options[:pidfile]).to_i
+      return :exited unless File.exists? pidfile
+      pid = ::File.read(pidfile).to_i
       return :dead if pid == 0
       Process.kill 0, pid
       :running
