@@ -1,31 +1,31 @@
 #!/usr/bin/env ruby
 
 require 'serialport'
+require 'thor'
 
-class Dirtmon
-  attr_reader :options, :quit
 
-  def initialize options
-    @options = options
-    @port = '/dev/ttyUSB0'
-    @baud_rate = 57600
-    @data_bits = 8
-    @stop_bits = 1
-    @parity    = SerialPort::NONE
-    #ob->handshake("none") || $log->logdie ("failed setting handshake")
-  end
+class Dirtmon < Thor
+  attr_reader :quit
 
-  def self.run! options
-    Dirtmon.new(options).run!
-  end
-
-  def run!
+  option :verbose,    :type => :boolean, :aliases => "-v", :desc => "increase verbosity"
+  default_task :listen
+  desc "listen", "Listen for messages from dirtmon"
+  def listen
     puts 'dirtmon starting'
-    SerialPort.open(@port, @baud_rate, @data_bits, @stop_bits, @parity) do |sp|
+
+    port = '/dev/ttyUSB0'
+    baud_rate = 57600
+    data_bits = 8
+    stop_bits = 1
+    parity    = SerialPort::NONE
+
+    SerialPort.open(port, baud_rate, data_bits, stop_bits, parity) do |sp|
       sp.puts '1i 212g' # node 1 in group 212
       while !quit
         puts 'dirtmon listening'
         while message = sp.gets.chomp
+          puts message if options[:verbose]
+
           # byte -> 0  1  2  3  4  5  6   7   8  9  10  11  12
           #         ====  ----------  - --- ---  -----  ------
           # eg   -> OK 2  2  0  0  0  2 115 117  0   0   0   0
@@ -61,4 +61,4 @@ class Dirtmon
   end
 end
 
-Dirtmon.run!(nil)
+Dirtmon.start
