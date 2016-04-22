@@ -5,6 +5,8 @@
 # ------------------------------------------------------------------------------------ [Time]
 # -------------------------------------------------------------------------------------------
 
+require 'time'
+
 class Time
   def self.genesis
     self.new(0)
@@ -248,13 +250,13 @@ class CalendarClient < Updateable
                                 max_results: 1,
                                 single_events: true,
                                 order_by: 'startTime',
-                                time_min: (Time.now -     update_interval).iso8601,
-                                time_max: (Time.now + 2 * update_interval).iso8601,
+                                time_min: (Time.now -  update_interval).iso8601,
+                                time_max: (Time.now + 3 * 24 * 60 * 60).iso8601,
                                 page_token: page_token,
                                 fields: 'items(id,summary,location,organizer,attendees,description,start,end),next_page_token')
-      #result.items.each {|ev| puts ev['start']['dateTime'] }
+      #result.items.each { |ev| $logger.debug "start: #(ev.start.date_time}" }
       unless result.items.first.nil?
-        trigger = result.items.first['start']['dateTime']
+        trigger = Time.parse result.items.first.start.date_time.to_s
       end
     rescue => e
       $logger.error "couldn't get calendar, #{e}"
