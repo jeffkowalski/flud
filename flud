@@ -1,5 +1,5 @@
 #!/usr/bin/env ruby
-
+# frozen_string_literal: true
 
 # -------------------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------------ [Time]
@@ -9,14 +9,13 @@ require 'time'
 
 class Time
   def self.genesis
-    self.new(0)
+    new(0)
   end
 
   def self.apocalypse
-    self.new(2038)
+    new(2038)
   end
 end
-
 
 # -------------------------------------------------------------------------------------------
 # ---------------------------------------------------------------------------- [XivelyClient]
@@ -32,16 +31,15 @@ class XivelyClient
 
   def put(stream, value)
     $logger.debug "putting data {#{stream}=>#{value}} to xively"
-    json = { :version => "1.0.0", :datastreams => [ {:id => stream, :current_value => value} ] }.to_json
+    json = { version: '1.0.0', datastreams: [{ id: stream, current_value: value }] }.to_json
     begin
-      response = @client.put @url, :body => json
-    rescue => e
+      response = @client.put @url, body: json
+    rescue StandardError => e
       $logger.error "can't put in xivelyclient, #{e}"
     end
     $logger.debug response
   end
 end
-
 
 # -------------------------------------------------------------------------------------------
 # ---------------------------------------------------------------------------------- [Valves]
@@ -68,27 +66,25 @@ class Valves
     @on = 0
 
     if RUBY_PLATFORM == 'armv6l-linux-eabihf'
-      $logger.info "initializing valves"
+      $logger.info 'initializing valves'
       @gpio = WiringPi::GPIO.new
       [DATA_PIN, SHIFT_PIN, STORE_PIN, NOE_PIN].each { |pin| @gpio.pin_mode pin, WiringPi::OUTPUT }
       [DATA_PIN, SHIFT_PIN, STORE_PIN, NOE_PIN].each { |pin| @gpio.digital_write pin, WiringPi::LOW }
     else
-      $logger.info "no valves found on this platform"
+      $logger.info 'no valves found on this platform'
     end
 
-    self.stop
+    stop
   end
 
-  def on
-    return @on
-  end
+  attr_reader :on
 
   def off?
-    return @on == 0
+    @on.zero?
   end
 
   def commit
-    $logger.info "committing valves"
+    $logger.info 'committing valves'
 
     if @gpio
       @gpio.digital_write SHIFT_PIN, WiringPi::LOW
@@ -107,10 +103,11 @@ class Valves
   end
 
   def advance
-    $semaphore.synchronize {
+    $semaphore.synchronize
+    begin
       loop do
         @on += 1
-        break if @on > $config[:valve_specs].length || $config[:valve_specs][@on-1][:duration]
+        break if @on > $config[:valve_specs].length || $config[:valve_specs][@on - 1][:duration]
       end
 
       if @on > $config[:valve_specs].length
@@ -118,40 +115,40 @@ class Valves
         @on = 0
         $trigger = Time.apocalypse
       else
-        $logger.info "advancing to run valve #{@on} - '#{$config[:valve_specs][@on-1][:name]}' for #{$config[:valve_specs][@on-1][:duration]} minutes"
-        $trigger = Time.now + $config[:valve_specs][@on-1][:duration] * 60 # duration in seconds
+        $logger.info "advancing to run valve #{@on} - '#{$config[:valve_specs][@on - 1][:name]}' for #{$config[:valve_specs][@on - 1][:duration]} minutes"
+        $trigger = Time.now + $config[:valve_specs][@on - 1][:duration] * 60 # duration in seconds
       end
-    }
+    end
 
     commit
   end
 
-  def start valve
-    $semaphore.synchronize {
+  def start(valve)
+    $semaphore.synchronize
+    begin
       @on = valve
-      if @on > $config[:valve_specs].length || @on < 0
+      if @on > $config[:valve_specs].length || @on.negative?
         $logger.info "valve #{@on} out of range"
         @on = 0
         $trigger = Time.apocalypse
       else
-        $logger.info "starting to run valve #{@on} - '#{$config[:valve_specs][@on-1][:name]}' for #{$config[:valve_specs][@on-1][:duration]} minutes"
-        $trigger = Time.now + $config[:valve_specs][@on-1][:duration] * 60 # duration in seconds
+        $logger.info "starting to run valve #{@on} - '#{$config[:valve_specs][@on - 1][:name]}' for #{$config[:valve_specs][@on - 1][:duration]} minutes"
+        $trigger = Time.now + $config[:valve_specs][@on - 1][:duration] * 60 # duration in seconds
       end
-    }
-
+    end
     commit
   end
 
   def stop
     $logger.info 'stopping valves'
-    $semaphore.synchronize {
+    $semaphore.synchronize
+    begin
       @on = 0
       $trigger = Time.apocalypse
-    }
+    end
     commit
   end
 end
-
 
 # -------------------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------ [Updateable]
@@ -164,24 +161,17 @@ class Updateable
     @last_check = Time.genesis
   end
 
-  def update_interval
-    @update_interval
-  end
-
-  def last_check
-    @last_check
-  end
+  attr_reader :update_interval, :last_check
 
   def freshen
     @last_check = Time.now
   end
 
-  def is_stale?
+  def stale?
     $logger.debug "checking whether #{self.class} (#{last_check}, #{update_interval}) is stale"
     Time.now - last_check >= update_interval
   end
 end
-
 
 # -------------------------------------------------------------------------------------------
 # -------------------------------------------------------------------------- [CalendarClient]
@@ -195,9 +185,9 @@ require_relative './patch.rb'
 
 OOB_URI = 'urn:ietf:wg:oauth:2.0:oob'
 APPLICATION_NAME = 'flud'
-CLIENT_SECRETS_PATH = ["/etc/#{APPLICATION_NAME}", '.'].select{ |dir| File.exists? "#{dir}/client_secret.json" }.first + "/client_secret.json"
+CLIENT_SECRETS_PATH = ["/etc/#{APPLICATION_NAME}", '.'].select { |dir| File.exist? "#{dir}/client_secret.json" }.first + '/client_secret.json'
 ENV['HOME'] ||= '/root'
-CREDENTIALS_PATH = File.join(Dir.home, '.credentials', "flud.yaml")
+CREDENTIALS_PATH = File.join(Dir.home, '.credentials', 'flud.yaml')
 SCOPE = 'https://www.googleapis.com/auth/calendar.readonly'
 
 ##
@@ -206,23 +196,23 @@ SCOPE = 'https://www.googleapis.com/auth/calendar.readonly'
 # the user's default browser will be launched to approve the request.
 #
 # @return [Google::Auth::UserRefreshCredentials] OAuth2 credentials
-def authorize interactive
+def authorize(interactive)
   FileUtils.mkdir_p(File.dirname(CREDENTIALS_PATH))
   client_id = Google::Auth::ClientId.from_file(CLIENT_SECRETS_PATH)
   token_store = Google::Auth::Stores::FileTokenStore.new(file: CREDENTIALS_PATH)
   authorizer = Google::Auth::UserAuthorizer.new(client_id, SCOPE, token_store)
   user_id = 'default'
   credentials = authorizer.get_credentials(user_id)
-  if credentials.nil? and interactive
+  if credentials.nil? && interactive
     url = authorizer.get_authorization_url(base_url: OOB_URI)
     puts "Open the following URL in the browser and enter the resulting code after authorization\n" + url
-    code = $stdin.readline()
+    code = $stdin.readline
     credentials = authorizer.get_and_store_credentials_from_code(
-      user_id: user_id, code: code, base_url: OOB_URI)
+      user_id: user_id, code: code, base_url: OOB_URI
+    )
   end
   credentials
 end
-
 
 class CalendarClient < Updateable
   def initialize
@@ -230,7 +220,7 @@ class CalendarClient < Updateable
     @update_interval = 15 * 60 # seconds
   end
 
-  def auth interactive
+  def auth(interactive)
     #
     # initialize the API
     #
@@ -242,7 +232,7 @@ class CalendarClient < Updateable
 
   def trigger
     trigger = Time.apocalypse
-    $logger.info "retrieving google calendar"
+    $logger.info 'retrieving google calendar'
 
     page_token = nil
     begin
@@ -250,23 +240,20 @@ class CalendarClient < Updateable
                                 max_results: 1,
                                 single_events: true,
                                 order_by: 'startTime',
-                                time_min: (Time.now -  update_interval).iso8601,
+                                time_min: (Time.now - update_interval).iso8601,
                                 time_max: (Time.now + 3 * 24 * 60 * 60).iso8601,
                                 page_token: page_token,
                                 fields: 'items(id,summary,location,organizer,attendees,description,start,end),next_page_token')
-      #result.items.each { |ev| $logger.debug "start: #(ev.start.date_time}" }
-      unless result.items.first.nil?
-        trigger = Time.parse result.items.first.start.date_time.to_s
-      end
-    rescue => e
+      # result.items.each { |ev| $logger.debug "start: #(ev.start.date_time}" }
+      trigger = Time.parse result.items.first.start.date_time.to_s unless result.items.first.nil?
+    rescue StandardError => e
       $logger.error "couldn't get calendar, #{e}"
     end
     freshen
     $logger.info "trigger = #{trigger}"
-    return trigger
+    trigger
   end
 end
-
 
 # -------------------------------------------------------------------------------------------
 # --------------------------------------------------------------------------- [WeatherClient]
@@ -287,22 +274,21 @@ class WeatherClient < Updateable
       $logger.info "retrieving weather for zipcode #{$config[:zipcode]}"
       begin
         data = @weather.forecast_for $config[:zipcode]
-        #$logger.debug data;
+        # $logger.debug data;
         data['forecast']['simpleforecast']['forecastday'].each do |forecast|
           $logger.debug "#{forecast['date']['pretty']} => #{forecast['qpf_allday']['in']}"
           rainfall += forecast['qpf_allday']['in']
         end
-      rescue => e
+      rescue StandardError => e
         $logger.error "couldn't get weather, #{e}"
       end
     end
     freshen
     $logger.info "rainfall = #{rainfall} in"
-    $xively.put "forecast.rainfall", rainfall
-    return rainfall
+    $xively.put 'forecast.rainfall', rainfall
+    rainfall
   end
 end
-
 
 # -------------------------------------------------------------------------------------------
 # ---------------------------------------------------------------------------------- [Status]
@@ -327,7 +313,6 @@ class Status < Updateable
   end
 end
 
-
 # -------------------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------- [Webserver]
 # -------------------------------------------------------------------------------------------
@@ -335,28 +320,28 @@ end
 require 'webrick'
 
 class Webserver
-  def initialize options
-    @webserver = WEBrick::HTTPServer.new :Port => 8888, :Logger => $logger, :AccessLog => []
+  def initialize(_options)
+    @webserver = WEBrick::HTTPServer.new Port: 8888, Logger: $logger, AccessLog: []
     @webserver.mount '/', Simple
   end
 
-  def self.run! options
+  def self.run!(options)
     Webserver.new(options).run!
   end
 
   def run!
-    $logger.info "starting webserver"
+    $logger.info 'starting webserver'
     @webserver.start
   end
 end
 
 class Simple < WEBrick::HTTPServlet::AbstractServlet
-  def encode_entities str
+  def encode_entities(str)
     str
   end
 
-  def do_GET request, response
-    $logger.info "webserver GET " + request.path
+  def do_GET(request, response) # rubocop:disable Naming/MethodName
+    $logger.info 'webserver GET ' + request.path
     case request.path
     when '/api/advance'
       do_api_advance request, response
@@ -373,40 +358,40 @@ class Simple < WEBrick::HTTPServlet::AbstractServlet
     end
   end
 
-  def do_api_advance request, response
+  def do_api_advance(_request, response)
     $valves.advance
     response.status = 200
     response['Content-Type'] = 'text/html'
-    response.body = "#{$valves.on}"
+    response.body = $valves.on.to_s
   end
 
-  def do_api_stop request, response
+  def do_api_stop(_request, response)
     $valves.stop
     response.status = 200
     response['Content-Type'] = 'text/html'
-    response.body = "#{$valves.on}"
+    response.body = $valves.on.to_s
   end
 
-  def do_api_startValve request, response
+  def do_api_start_valve(request, response)
     $valves.start request.query['valve'].to_i
     response.status = 200
     response['Content-Type'] = 'text/html'
-    response.body = "#{$valves.on}"
+    response.body = $valves.on.to_s
   end
 
-  def do_api_getStatus request, response
+  def do_api_get_status(_request, response)
     response.status = 200
     response['Content-Type'] = 'text/json'
-    response.body = {:timestamp => Time.now,
-                     :trigger   => $trigger,
-                     :rainfall  => $rainfall,
-                     :moisture  => $moisture,
-                     :voltage   => $voltage,
-                     :dirtmon_timestamp => $dirtmon_timestamp,
-                     :valveOn   => $valves.on}.to_json
+    response.body = { timestamp: Time.now,
+                      trigger: $trigger,
+                      rainfall: $rainfall,
+                      moisture: $moisture,
+                      voltage: $voltage,
+                      dirtmon_timestamp: $dirtmon_timestamp,
+                      valveOn: $valves.on }.to_json
   end
 
-  def do_index request, response
+  def do_index(_request, response)
     response.status = 200
     response['Content-Type'] = 'text/html'
     response.body = <<INDEX_HTML
@@ -416,9 +401,9 @@ class Simple < WEBrick::HTTPServlet::AbstractServlet
         $("div.running").hide ();
         $("div.running").filter (function (index) {return index + 1 == num;}).show ("fast");
       }
-      function startValve (num) {
+      function start_valve (num) {
         $.ajax({
-          url: "/api/startValve",
+          url: "/api/start_valve",
           data: {
             valve: num + 1
           },
@@ -448,7 +433,7 @@ class Simple < WEBrick::HTTPServlet::AbstractServlet
       }
       function refreshStatus () {
         $.ajax({
-          url: "/api/getStatus",
+          url: "/api/get_status",
           dataType: "json",
           success: function (data) {
             $("#timestamp").html(data.timestamp);
@@ -476,33 +461,33 @@ class Simple < WEBrick::HTTPServlet::AbstractServlet
       <br>
       Valves <form method='POST'>
 INDEX_HTML
-    (0..($config[:valve_specs].length-1)).each do |ii|
-      response.body += "<input type='text' name='n#{ii}' value='#{$config[:valve_specs][ii][:name]}' />" +
-                       "<input type='text' name='d#{ii}' value='#{$config[:valve_specs][ii][:duration]}' />" +
-                       "<input type='button' name='s#{ii}' value='start' onclick='startValve(#{ii})' />" +
-                       "<div class='running' style='display:inline;'>&lt;-- ON</div>" +
-                       "<br>"
+    (0..($config[:valve_specs].length - 1)).each do |ii|
+      response.body += "<input type='text' name='n#{ii}' value='#{$config[:valve_specs][ii][:name]}' />" \
+                       "<input type='text' name='d#{ii}' value='#{$config[:valve_specs][ii][:duration]}' />" \
+                       "<input type='button' name='s#{ii}' value='start' onclick='start_valve(#{ii})' />" \
+                       "<div class='running' style='display:inline;'>&lt;-- ON</div>" \
+                       '<br>'
     end
-    response.body += "<input type='button' value='advance' onclick='advance()' />" +
-                     "<input type='button' value='stop' onclick='stop()' />" +
-                     "<br><br>" +
-                     "Google calendar id  <input type='text' name='calendar_id'         value='#{$config[:calendar_id]}' /><br>" +
-                     "Wunderground API key<input type='text' name='wunderground_apikey' value='#{$config[:wunderground_apikey]}' /><br>" +
-                     "Zipcode             <input type='text' name='zipcode'             value='#{$config[:zipcode]}' /><br>" +
-                     "Xively API key      <input type='text' name='xively_apikey'       value='#{$config[:xively_apikey]}' /><br>" +
-                     "Xively feed id      <input type='text' name='xively_feed'         value='#{$config[:xively_feed]}' /><br>" +
-                     "Rain threshold      <input type='text' name='rain_threshold'      value='#{$config[:rain_threshold]}' /><br>" +
-                     "Moisture threshold  <input type='text' name='moisture_threshold'  value='#{$config[:moisture_threshold]}' /><br>" +
-                     "<input type='hidden' name='h' />" +
+    response.body += "<input type='button' value='advance' onclick='advance()' />" \
+                     "<input type='button' value='stop' onclick='stop()' />" \
+                     '<br><br>' \
+                     "Google calendar id  <input type='text' name='calendar_id'         value='#{$config[:calendar_id]}' /><br>" \
+                     "Wunderground API key<input type='text' name='wunderground_apikey' value='#{$config[:wunderground_apikey]}' /><br>" \
+                     "Zipcode             <input type='text' name='zipcode'             value='#{$config[:zipcode]}' /><br>" \
+                     "Xively API key      <input type='text' name='xively_apikey'       value='#{$config[:xively_apikey]}' /><br>" \
+                     "Xively feed id      <input type='text' name='xively_feed'         value='#{$config[:xively_feed]}' /><br>" \
+                     "Rain threshold      <input type='text' name='rain_threshold'      value='#{$config[:rain_threshold]}' /><br>" \
+                     "Moisture threshold  <input type='text' name='moisture_threshold'  value='#{$config[:moisture_threshold]}' /><br>" \
+                     "<input type='hidden' name='h' />" \
                      "<input type='submit' value='Submit' /></form>"
   end
 
-  def do_POST request, response
+  def do_POST(request, response) # rubocop:disable Naming/MethodName
     $logger.info "webserver POST #{request.query}"
     request.query.each do |key, value|
-      if index = /^n(\d+)/.match(key)
+      if (index = /^n(\d+)/.match(key))
         $config[:valve_specs][index.captures[0].to_i][:name] = value.to_s
-      elsif index = /^d(\d+)/.match(key)
+      elsif (index = /^d(\d+)/.match(key))
         $config[:valve_specs][index.captures[0].to_i][:duration] = value.to_i
       elsif /_threshold/.match(key)
         $config[key.to_sym] = value.to_f
@@ -515,7 +500,6 @@ INDEX_HTML
   end
 end
 
-
 # -------------------------------------------------------------------------------------------
 # --------------------------------------------------------------------------------- [Dirtmon]
 # -------------------------------------------------------------------------------------------
@@ -525,17 +509,17 @@ require 'serialport'
 class Dirtmon
   attr_reader :options, :quit
 
-  def initialize options
+  def initialize(options)
     @options = options
     @port = '/dev/ttyUSB0'
-    @baud_rate = 57600
+    @baud_rate = 57_600
     @data_bits = 8
     @stop_bits = 1
     @parity    = SerialPort::NONE
-    #ob->handshake("none") || $log->logdie ("failed setting handshake")
+    # ob->handshake("none") || $log->logdie ("failed setting handshake")
   end
 
-  def self.run! options
+  def self.run!(options)
     Dirtmon.new(options).run!
   end
 
@@ -543,9 +527,11 @@ class Dirtmon
     $logger.info 'dirtmon starting'
     SerialPort.open(@port, @baud_rate, @data_bits, @stop_bits, @parity) do |sp|
       sp.puts '1i 212g' # node 1 in group 212
-      while !quit
+      until quit
         $logger.debug 'dirtmon listening'
-        while message = sp.gets.chomp
+        while (message = sp.gets.chomp)
+          next unless message =~ /^OK 2/
+
           # byte -> 0  1  2  3  4  5  6   7   8  9  10  11  12
           #         ====  ----------  - --- ---  -----  ------
           # eg   -> OK 2  2  0  0  0  2 115 117  0   0   0   0
@@ -556,23 +542,22 @@ class Dirtmon
           #  byte vcc2;      // battery voltage (BOOST=1), or VCC after transmit (BOOST=0)
           #  word sensor;    // sensor1
           #  word sensor;    // sensor2
-          if message =~ /^OK 2/
-            rec = message.split(' ').map{ |v| v.to_i }
-            ping  = rec[2] + rec[3] * 256 + rec[4] * 256 * 256 + rec[5] * 256 * 256 * 256
-            id    = rec[6]
-            vcc1  = rec[7] / 250.0 * 5.0 + 1.0
-            vcc2  = rec[8] / 250.0 * 5.0 + 1.0
-            sensor1 = rec[9] + rec[10] * 256
-            sensor2 = rec[11] + rec[12] * 256
-            $logger.info ['dirtmon', ping, id, vcc1, vcc2, sensor1, sensor2].join(' ')
-            $xively.put "dirtmon1.vcc1", vcc1
-            $xively.put "dirtmon1.vcc2", vcc2
-            $xively.put "dirtmon1.moisture1", sensor1
-            $xively.put "dirtmon1.moisture2", sensor2
-            $moisture = (sensor1 + sensor2) / 2
-            $voltage  = (vcc1 + vcc2) / 2.0
-            $dirtmon_timestamp = Time.now
-          end
+          rec = message.split(' ').map(&:to_i)
+          ping  = rec[2] + rec[3] * 256 + rec[4] * 256 * 256 + rec[5] * 256 * 256 * 256
+          id    = rec[6]
+          vcc1  = rec[7] / 250.0 * 5.0 + 1.0
+          vcc2  = rec[8] / 250.0 * 5.0 + 1.0
+          sensor1 = rec[9] + rec[10] * 256
+          sensor2 = rec[11] + rec[12] * 256
+
+          $logger.info ['dirtmon', ping, id, vcc1, vcc2, sensor1, sensor2].join(' ')
+          $xively.put 'dirtmon1.vcc1', vcc1
+          $xively.put 'dirtmon1.vcc2', vcc2
+          $xively.put 'dirtmon1.moisture1', sensor1
+          $xively.put 'dirtmon1.moisture2', sensor2
+          $moisture = (sensor1 + sensor2) / 2
+          $voltage  = (vcc1 + vcc2) / 2.0
+          $dirtmon_timestamp = Time.now
         end
         sleep 1
       end
@@ -581,7 +566,6 @@ class Dirtmon
   end
 end
 
-
 # -------------------------------------------------------------------------------------------
 # ---------------------------------------------------------------------------------- [Config]
 # -------------------------------------------------------------------------------------------
@@ -589,63 +573,58 @@ end
 class Configuration
   attr_accessor :params
 
-  def initialize locations
-    @params = {:calendar_id         => nil,
-               :wunderground_apikey => nil,
-               :xively_feed         => nil,
-               :xively_apikey       => nil,
-               :zipcode             => nil,
-               :rain_threshold      => nil,
-               :moisture_threshold  => nil,
-               :valve_specs         => (1..8).map{|v| {:name => "valve.#{v}", :duration => 1}}}
+  def initialize(locations)
+    @params = { calendar_id: nil,
+                wunderground_apikey: nil,
+                xively_feed: nil,
+                xively_apikey: nil,
+                zipcode: nil,
+                rain_threshold: nil,
+                moisture_threshold: nil,
+                valve_specs: (1..8).map { |v| { name: "valve.#{v}", duration: 1 } } }
 
-    locations.each { |file|
-      if File.file? file
-        @conf_file = file
-        @params = YAML.load_file @conf_file
-        break
-      end
-    }
-    unless @conf_file
-      @conf_file = locations[0]
-      write
+    locations.each do |file|
+      next unless File.file? file
+
+      @conf_file = file
+      @params = YAML.load_file @conf_file
+      break
     end
+
+    return if @conf_file
+
+    @conf_file = locations[0]
+    write
   end
 
   def [](param)
-    return self.params[param]
+    params[param]
   end
 
   def []=(param, value)
-    self.params[param] = value
-  end
-
-  def get_params
-    return self.params.keys
+    params[param] = value
   end
 
   def write
     $logger.info 'writing configuration file'
     File.open(@conf_file, 'w') do |file|
-      file.write(YAML.dump @params)
+      file.write(YAML.dump(@params))
     end
   end
 end
 
-$config = Configuration::new(["flud.yml", "/etc/flud/flud.yml"])
-
+$config = Configuration.new(['flud.yml', '/etc/flud/flud.yml'])
 
 class IOToLog < IO
   def initialize(logger)
     @logger = logger
   end
 
-  def write(string)
-    #assume anything written to stderr is an error
+  def write(message)
+    # assume anything written to stderr is an error
     @logger.error(message)
   end
 end
-
 
 # -------------------------------------------------------------------------------------------
 # ---------------------------------------------------------------------------------- [Server]
@@ -655,29 +634,28 @@ require 'fileutils'
 require 'logger'
 require 'thor'
 
-
 # server class from https://github.com/jakesgordon/ruby-sample-daemon/blob/master/lib/server.rb
 class Server < Thor
   attr_reader :quit
 
-  desc "auth", "Authorize the application with google services"
+  desc 'auth', 'Authorize the application with google services'
   def auth
     $logger = Logger.new STDOUT
-    $calendar = CalendarClient::new
+    $calendar = CalendarClient.new
     $calendar.auth true
   end
 
-  option :logfile,    :type => :string, :default => '/var/log/flud.log', :desc => "log output to file (use empty string to log to stdout)"
-  option :pidfile,    :type => :string, :default => '/var/run/flud.pid', :desc => "write pid to file (use empty string to avoid pidfile)"
-  option :verbose,    :type => :boolean, :aliases => "-v", :desc => "increase verbosity"
-  option :foreground, :type => :boolean, :aliases => "-f", :desc => "don't daemonize, run in foreground"
-  option :debug,      :type => :boolean, :desc => "debug mode, implies --logfile='', --pidfile='', --foreground, --verbose"
+  option :logfile,    type: :string,  default: '/var/log/flud.log', desc: 'log output to file (use empty string to log to stdout)'
+  option :pidfile,    type: :string,  default: '/var/run/flud.pid', desc: 'write pid to file (use empty string to avoid pidfile)'
+  option :verbose,    type: :boolean, aliases: '-v', desc: 'increase verbosity'
+  option :foreground, type: :boolean, aliases: '-f', desc: "don't daemonize, run in foreground"
+  option :debug,      type: :boolean, desc: "debug mode, implies --logfile='', --pidfile='', --foreground, --verbose"
   default_task :control
-  desc "control", "Run the flud control system"
+  desc 'control', 'Run the flud control system'
   def control
     puts options
-    newoptions=options.dup # unfreeze
-    options=newoptions
+    newoptions = options.dup # unfreeze
+    options = newoptions
     if options[:debug]
       options[:logfile] = ''
       options[:pidfile] = ''
@@ -685,8 +663,8 @@ class Server < Thor
       options[:foreground] = true
     end
 
-    if (not options[:foreground]) && Process.euid != 0
-      puts "only root can daemonize, run with --foreground instead"
+    if (!options[:foreground]) && Process.euid != 0
+      puts 'only root can daemonize, run with --foreground instead'
       exit
     end
 
@@ -701,40 +679,40 @@ class Server < Thor
     $logger.level = options[:verbose] ? Logger::DEBUG : Logger::INFO
     $logger.info 'starting'
 
-    $semaphore = Mutex::new
-    $xively    = XivelyClient::new
-    $valves    = Valves::new
-    $weather   = WeatherClient::new
-    $calendar  = CalendarClient::new
+    $semaphore = Mutex.new
+    $xively    = XivelyClient.new
+    $valves    = Valves.new
+    $weather   = WeatherClient.new
+    $calendar  = CalendarClient.new
     $calendar.auth options[:logfile].empty? && options[:foreground]
-    $status    = Status::new
+    $status    = Status.new
     $trigger   = Time.apocalypse
     $rainfall  = 0
     $moisture  = 0
     $voltage   = 0
     $dirtmon_timestamp = Time.genesis
 
-    Thread.new{Dirtmon.run! nil}
-    Thread.new{Webserver.run! nil}
+    Thread.new { Dirtmon.run! nil }
+    Thread.new { Webserver.run! nil }
 
-    while !quit do
-      if $valves.off? && $weather.is_stale?
+    until quit
+      if $valves.off? && $weather.stale?
         $rainfall = $weather.rainfall
-      elsif $valves.off? && $calendar.is_stale?
+      elsif $valves.off? && $calendar.stale?
         $trigger = $calendar.trigger
       elsif $trigger < Time.now
         $logger.debug 'triggering'
         if !$valves.off? || ($rainfall <= $config[:rain_threshold] && $moisture <= $config[:moisture_threshold])
           $valves.advance
         else
-          if $rainfall > $config[:rain_threshold]
-            $logger.info "rainfall delay"
-          elsif $moisture > $config[:moisture_threshold]
-            $logger.info "moisture delay"
+          if $rainfall > $config[:rain_threshold] # rubocop:disable Metrics/BlockNesting
+            $logger.info 'rainfall delay'
+          elsif $moisture > $config[:moisture_threshold] # rubocop:disable Metrics/BlockNesting
+            $logger.info 'moisture delay'
           end
           $trigger += $weather.update_interval
         end
-      elsif $status.is_stale?
+      elsif $status.stale?
         $status.print
       end
       sleep 1
@@ -746,54 +724,56 @@ class Server < Thor
     $logger.info 'exiting'
   end
 
-
-  no_commands {
+  no_commands
+  begin
     def daemonize
       exit if fork
       Process.setsid
       exit if fork
-      Dir.chdir "/"
+      Dir.chdir '/'
     end
 
-    def redirect_output logfile
-      if not logfile.empty?
-        FileUtils.mkdir_p(File.dirname(logfile), :mode => 0755)
-        FileUtils.touch logfile
-        File.chmod 0644, logfile
-        $stderr.reopen logfile, 'a'
-        $stdout.reopen $stderr
-        $stdout.sync = $stderr.sync = true
+    def redirect_output(logfile)
+      return if logfile.empty?
+
+      FileUtils.mkdir_p(File.dirname(logfile), mode: 0o755)
+      FileUtils.touch logfile
+      File.chmod 0o644, logfile
+      $stderr.reopen logfile, 'a'
+      $stdout.reopen $stderr
+      $stdout.sync = $stderr.sync = true
+    end
+
+    def write_pid(pidfile)
+      return unless !pidfile.empty? && Process.euid.zero?
+
+      begin
+        File.open(pidfile, ::File::CREAT | ::File::EXCL | ::File::WRONLY) { |f| f.write Process.pid.to_s }
+        at_exit { File.delete(pidfile) if File.exist? pidfile }
+      rescue Errno::EEXIST
+        check_pid pidfile
+        retry
       end
     end
 
-    def write_pid pidfile
-      if (not pidfile.empty?) && Process.euid == 0
-        begin
-          File.open(pidfile, ::File::CREAT | ::File::EXCL | ::File::WRONLY){|f| f.write "#{Process.pid}" }
-          at_exit { File.delete(pidfile) if File.exists? pidfile }
-        rescue Errno::EEXIST
-          check_pid pidfile
-          retry
-        end
+    def check_pid(pidfile)
+      return if pidfile.empty?
+
+      case pid_status pidfile
+      when :running, :not_owned
+        puts "A server is already running. Check #{pidfile}"
+        exit 1
+      when :dead
+        File.delete pidfile
       end
     end
 
-    def check_pid pidfile
-      if not pidfile.empty?
-        case pid_status pidfile
-        when :running, :not_owned
-          puts "A server is already running. Check #{pidfile}"
-          exit 1
-        when :dead
-          File.delete pidfile
-        end
-      end
-    end
+    def pid_status(pidfile)
+      return :exited unless File.exist? pidfile
 
-    def pid_status pidfile
-      return :exited unless File.exists? pidfile
       pid = ::File.read(pidfile).to_i
-      return :dead if pid == 0
+      return :dead if pid.zero?
+
       Process.kill 0, pid
       :running
     rescue Errno::ESRCH
@@ -803,13 +783,12 @@ class Server < Thor
     end
 
     def trap_signals
-      trap(:INT)  do @quit = true; end
-      trap(:QUIT) do @quit = true; end
-      trap(:TERM) do @quit = true; end
+      trap(:INT)  { @quit = true; }
+      trap(:QUIT) { @quit = true; }
+      trap(:TERM) { @quit = true; }
     end
-  }
+  end
 end
-
 
 # -------------------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------------- [Run]
