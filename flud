@@ -89,7 +89,7 @@ class Valves
     if @gpio
       @gpio.digital_write SHIFT_PIN, WiringPi::LOW
       @gpio.digital_write STORE_PIN, WiringPi::LOW
-      8.downto(1) do |ii|
+      $config[:valve_specs].length.downto(1) do |ii|
         @gpio.digital_write SHIFT_PIN, WiringPi::LOW
         @gpio.digital_write DATA_PIN, @on == ii ? WiringPi::HIGH : WiringPi::LOW
         @gpio.digital_write SHIFT_PIN, WiringPi::HIGH
@@ -97,14 +97,13 @@ class Valves
       @gpio.digital_write STORE_PIN, WiringPi::HIGH
     end
 
-    8.downto(1) do |ii|
+    $config[:valve_specs].length.downto(1) do |ii|
       $xively.put "valve.#{ii}", @on == ii ? WiringPi::HIGH : WiringPi::LOW
     end
   end
 
   def advance
-    $semaphore.synchronize
-    begin
+    $semaphore.synchronize do
       loop do
         @on += 1
         break if @on > $config[:valve_specs].length || $config[:valve_specs][@on - 1][:duration]
@@ -124,8 +123,7 @@ class Valves
   end
 
   def start(valve)
-    $semaphore.synchronize
-    begin
+    $semaphore.synchronize do
       @on = valve
       if @on > $config[:valve_specs].length || @on.negative?
         $logger.info "valve #{@on} out of range"
@@ -141,8 +139,7 @@ class Valves
 
   def stop
     $logger.info 'stopping valves'
-    $semaphore.synchronize
-    begin
+    $semaphore.synchronize do
       @on = 0
       $trigger = Time.apocalypse
     end
@@ -347,10 +344,10 @@ class Simple < WEBrick::HTTPServlet::AbstractServlet
       do_api_advance request, response
     when '/api/stop'
       do_api_stop request, response
-    when '/api/startValve'
-      do_api_startValve request, response
-    when '/api/getStatus'
-      do_api_getStatus request, response
+    when '/api/start_valve'
+      do_api_start_valve request, response
+    when '/api/get_status'
+      do_api_get_status request, response
     when '/favicon.ico'
       response.status = 404
     when '/'
@@ -724,8 +721,7 @@ class Server < Thor
     $logger.info 'exiting'
   end
 
-  no_commands
-  begin
+  no_commands do
     def daemonize
       exit if fork
       Process.setsid
