@@ -3,7 +3,7 @@ REMOTE_USER=pi
 
 all:
 
-.PHONY: install uninstall purge remote-install remote-uninstall remote-purge
+.PHONY: install uninstall purge remote-copy remote-install remote-uninstall remote-purge
 
 install:
 	PATH="/home/${REMOTE_USER}/.rbenv/shims:${PATH}" bundle install
@@ -41,7 +41,7 @@ purge: uninstall
 	-sudo rm -f /etc/flud.yml
 	-sudo rm -f ~root/.credentials/flud.yaml
 
-remote-install:
+remote-copy:
 	( cd .. ; \
 	  tar cvf - \
 	    flud/dirtmon/listen.rb \
@@ -55,6 +55,8 @@ remote-install:
 	    flud/Gemfile \
 	    flud/Makefile \
 	  | ssh $(REMOTE_USER)@$(REMOTE_MACHINE) tar xvf - )
+
+remote-install: remote-copy
 	ssh $(REMOTE_USER)@$(REMOTE_MACHINE) "cd ~/flud; make install"
 
 remote-uninstall:
