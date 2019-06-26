@@ -18,26 +18,23 @@ class Time
 end
 
 # -------------------------------------------------------------------------------------------
-# ---------------------------------------------------------------------------- [XivelyClient]
+# ---------------------------------------------------------------------------- [InfluxClient]
 # -------------------------------------------------------------------------------------------
 
-require 'xively-rb'
+require 'influxdb'
 
-class XivelyClient
+class InfluxClient
   def initialize
-    @client = Xively::Client.new $config[:xively_apikey]
-    @url = "/v2/feeds/#{$config[:xively_feed]}"
+    @influxdb = InfluxDB::Client.new url: $config[:influxdb_url]
   end
 
-  def put(stream, value)
-    $logger.debug "putting data {#{stream}=>#{value}} to xively"
-    json = { version: '1.0.0', datastreams: [{ id: stream, current_value: value }] }.to_json
+  def put(measurement, value)
+    $logger.debug "putting data {#{measurement} => #{value}} to influxdb"
     begin
-      response = @client.put @url, body: json
+      @influxdb.write_point(measurement, values: { value: value })
     rescue StandardError => e
-      $logger.error "can't put in xivelyclient, #{e}"
+      $logger.error "can't put in influx client, #{e}"
     end
-    $logger.debug response
   end
 end
 
@@ -61,11 +58,13 @@ class Valves
   #                                                 # connect rPi 6 GND to ~OE 13 (output enable, active low) to ground
 
   # Connect the shift register pins to these GPIO pins.
-  def initialize
+  def initialize(dry_run = false)
     @gpio = nil
     @on = 0
 
-    if RUBY_PLATFORM == 'armv6l-linux-eabihf'
+    if dry_run
+      $logger.info 'dry_run, will ignore valve actuation'
+    elsif RUBY_PLATFORM == 'armv6l-linux-eabihf'
       $logger.info 'initializing valves'
       @gpio = WiringPi::GPIO.new
       [DATA_PIN, SHIFT_PIN, STORE_PIN, NOE_PIN].each { |pin| @gpio.pin_mode pin, WiringPi::OUTPUT }
@@ -98,7 +97,7 @@ class Valves
     end
 
     $config[:valve_specs].length.downto(1) do |ii|
-      $xively.put "valve.#{ii}", @on == ii ? WiringPi::HIGH : WiringPi::LOW
+      $influx.put "valve_#{ii}", @on == ii ? 1 : 0
     end
   end
 
@@ -282,7 +281,7 @@ class WeatherClient < Updateable
     end
     freshen
     $logger.info "rainfall = #{rainfall} in"
-    $xively.put 'forecast.rainfall', rainfall
+    $influx.put 'forecast_rainfall', rainfall
     rainfall
   end
 end
@@ -471,8 +470,7 @@ INDEX_HTML
                      "Google calendar id  <input type='text' name='calendar_id'         value='#{$config[:calendar_id]}' /><br>" \
                      "Wunderground API key<input type='text' name='wunderground_apikey' value='#{$config[:wunderground_apikey]}' /><br>" \
                      "Zipcode             <input type='text' name='zipcode'             value='#{$config[:zipcode]}' /><br>" \
-                     "Xively API key      <input type='text' name='xively_apikey'       value='#{$config[:xively_apikey]}' /><br>" \
-                     "Xively feed id      <input type='text' name='xively_feed'         value='#{$config[:xively_feed]}' /><br>" \
+                     "InfluxDB URL        <input type='text' name='influxdb_url'        value='#{$config[:influxdb_url]}' /><br>" \
                      "Rain threshold      <input type='text' name='rain_threshold'      value='#{$config[:rain_threshold]}' /><br>" \
                      "Moisture threshold  <input type='text' name='moisture_threshold'  value='#{$config[:moisture_threshold]}' /><br>" \
                      "<input type='hidden' name='h' />" \
@@ -548,10 +546,10 @@ class Dirtmon
           sensor2 = rec[11] + rec[12] * 256
 
           $logger.info ['dirtmon', ping, id, vcc1, vcc2, sensor1, sensor2].join(' ')
-          $xively.put 'dirtmon1.vcc1', vcc1
-          $xively.put 'dirtmon1.vcc2', vcc2
-          $xively.put 'dirtmon1.moisture1', sensor1
-          $xively.put 'dirtmon1.moisture2', sensor2
+          $influx.put 'dirtmon1_vcc1', vcc1
+          $influx.put 'dirtmon1_vcc2', vcc2
+          $influx.put 'dirtmon1_moisture1', sensor1
+          $influx.put 'dirtmon1_moisture2', sensor2
           $moisture = (sensor1 + sensor2) / 2
           $voltage  = (vcc1 + vcc2) / 2.0
           $dirtmon_timestamp = Time.now
@@ -573,8 +571,7 @@ class Configuration
   def initialize(locations)
     @params = { calendar_id: nil,
                 wunderground_apikey: nil,
-                xively_feed: nil,
-                xively_apikey: nil,
+                influxdb_url: nil,
                 zipcode: nil,
                 rain_threshold: nil,
                 moisture_threshold: nil,
@@ -647,6 +644,7 @@ class Server < Thor
   option :verbose,    type: :boolean, aliases: '-v', desc: 'increase verbosity'
   option :foreground, type: :boolean, aliases: '-f', desc: "don't daemonize, run in foreground"
   option :debug,      type: :boolean, desc: "debug mode, implies --logfile='', --pidfile='', --foreground, --verbose"
+  option :dry_run,    type: :boolean, desc: "don't actuate valves"
   default_task :control
   desc 'control', 'Run the flud control system'
   def control
@@ -677,8 +675,8 @@ class Server < Thor
     $logger.info 'starting'
 
     $semaphore = Mutex.new
-    $xively    = XivelyClient.new
-    $valves    = Valves.new
+    $influx    = InfluxClient.new
+    $valves    = Valves.new options[:dry_run]
     $weather   = WeatherClient.new
     $calendar  = CalendarClient.new
     $calendar.auth options[:logfile].empty? && options[:foreground]
