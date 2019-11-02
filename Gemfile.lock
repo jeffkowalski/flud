@@ -79,7 +79,7 @@ GEM
       addressable
       httparty (> 0.6.0)
       json (> 1.4.0)
-    yard (0.9.19)
+    yard (0.9.20)
 
 PLATFORMS
   ruby
