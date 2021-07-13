@@ -17,11 +17,11 @@ PLATFORMS
   ruby
 
 DEPENDENCIES
-  method_source (>= 0.8.2)
+  method_source
   pry
-  pry-doc (>= 0.6.0)
+  pry-doc
   serialport
   thor
 
 BUNDLED WITH
-   2.1.4
+   2.2.23
